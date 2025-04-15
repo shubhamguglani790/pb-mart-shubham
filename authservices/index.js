@@ -1,3 +1,4 @@
+// index.js
 const express = require('express');
 const connectDB = require('./config/db');
 const config = require('./config/config');

@@ -176,6 +176,63 @@ const categoryController = {
       res.status(500).json({ error: 'Import failed', details: error.message });
     }
   },
+  getAllCategories: async (req, res) => {
+    try {
+      const { page = 1, limit = 10 } = req.query;
+      const skip = (page - 1) * limit;
+
+      const categories = await Category.find()
+        .sort({ name: 1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+
+      const total = await Category.countDocuments();
+
+      if (!categories || categories.length === 0) {
+        logger.info('No categories found');
+        return res.status(404).json({ message: 'No categories found' });
+      }
+
+      const formattedCategories = categories.map(category => ({
+        id: category._id.toString(),
+        name: category.name,
+        description: category.description,
+        subcategories: category.subcategories,
+      }));
+
+      logger.info('All categories retrieved', { count: categories.length, page, limit });
+      res.status(200).json({
+        categories: formattedCategories,
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(total / limit),
+      });
+    } catch (error) {
+      logger.error('Failed to get all categories', { error: error.message });
+      res.status(500).json({ error: 'Failed to retrieve categories', details: error.message });
+    }
+  },
+
+  getSubcategories: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const category = await Category.findById(id);
+      if (!category) {
+        logger.error('Category not found', { id });
+        return res.status(404).json({ error: 'Category not found' });
+      }
+
+      logger.info('Subcategories retrieved', { id, subcategoryCount: category.subcategories.length });
+      res.status(200).json(category.subcategories);
+    } catch (error) {
+      logger.error('Failed to get subcategories', { error: error.message, id: req.params.id });
+      res.status(400).json({ error: error.message });
+    }
+  },
+
 };
+
+
 
 module.exports = categoryController;
