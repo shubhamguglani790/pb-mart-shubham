@@ -1,12 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const productController = require('../controllers/productController');
-const { authSeller } = require('../middleware/authSeller');
 
-router.post('/add/products', authSeller, productController.createProduct);
+// Route for listing products by category (no authentication)
+router.get('/products/by-category', productController.listProductsByCategory);
+
+// Other routes
+router.post('/add/products', productController.createProduct);
 router.get('/products', productController.getAllProducts);
-router.get('/products/category', authSeller, productController.listProductsByCategory);
-router.get('/products/seller', authSeller, productController.getProductsBySeller);
-router.get('/products/all', authSeller, productController.getAllProductsWithSellerVerification);
+router.get('/products/by-seller-id', productController.getProductsBySellerId);
 
 module.exports = router;

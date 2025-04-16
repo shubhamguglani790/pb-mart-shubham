@@ -10,11 +10,12 @@ dotenv.config();
 const app = express();
 
 app.use(express.json());
-app.use('/', categoryRoutes); // Base path '/' for /categories, /add/categories, etc.
+app.use('/uploads', express.static(path.join(__dirname, 'Uploads'))); // Serve Uploads directory
+app.use('/', categoryRoutes);
 
 const uploadsDir = path.join(__dirname, 'Uploads');
 if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(UploadsDir);
+  fs.mkdirSync(uploadsDir);
 }
 
 mongoose.connect(process.env.MONGODB_URI)

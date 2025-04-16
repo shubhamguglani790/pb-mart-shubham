@@ -8,17 +8,17 @@ const config = require('../config/config');
 // Utility to mask mobile number (e.g., +91XXXXXXXXXX0790)
 const maskMobile = (mobile) => {
   if (!mobile || mobile.length < 4) return 'XXXXXXXXXX****';
-  
+
   // Detect country code (e.g., +91, +1) at the start
   let countryCode = '';
   const countryCodeMatch = mobile.match(/^(\+\d{1,3}\s?)/);
   let number = mobile;
-  
+
   if (countryCodeMatch) {
     countryCode = countryCodeMatch[0].trim();
     number = mobile.slice(countryCode.length);
   }
-  
+
   // Use 10 X's + last 4 digits
   if (number.length < 4) return countryCode + 'XXXXXXXXXX****';
   return countryCode + 'XXXXXXXXXX' + number.slice(-4);
@@ -27,10 +27,10 @@ const maskMobile = (mobile) => {
 // Utility to validate mobile number (10 digits after country code)
 const validateMobile = (mobile) => {
   if (!mobile) return false;
-  
+
   // Strip country code (e.g., +91, +1)
   const number = mobile.replace(/^(\+\d{1,3}\s?)/, '');
-  
+
   // Check if exactly 10 digits
   return /^\d{10}$/.test(number);
 };
@@ -45,7 +45,7 @@ const getNextSellerId = async () => {
 const validateFields = (body, allowedFields) => {
   const receivedFields = Object.keys(body);
   return receivedFields.every(field => allowedFields.includes(field)) &&
-         receivedFields.length === allowedFields.length;
+    receivedFields.length === allowedFields.length;
 };
 
 const authController = {
@@ -88,7 +88,7 @@ const authController = {
 
       logger.info('User registered', { mobile: maskMobile(mobile), sellerId });
       res.status(201).json({
-        message: `User registered successfully with mobile ${maskMobile(mobile)}`,
+        message: `${name} registered successfully with mobile ${maskMobile(mobile)}`,
       });
     } catch (error) {
       logger.error('Failed to register user', { error: error.message });
@@ -125,7 +125,7 @@ const authController = {
 
       logger.info('OTP request generated', { mobile: maskMobile(mobile) });
       res.status(200).json({
-        message: `OTP sent for mobile ${maskMobile(mobile)} (use 12345)`,
+        message: `OTP sent for mobile ${maskMobile(mobile)}`,
       });
     } catch (error) {
       logger.error('Failed to generate OTP', { error: error.message });
@@ -183,7 +183,7 @@ const authController = {
 
       logger.info('User logged in', { mobile: maskMobile(user.mobile), sellerId: user.sellerId });
       res.status(200).json({
-        message: `User logged in successfully with mobile ${maskMobile(user.mobile)}`,
+        message: `${user.name} logged in successfully with mobile ${maskMobile(user.mobile)}`,
         token: token,
       });
     } catch (error) {

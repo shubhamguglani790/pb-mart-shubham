@@ -1,19 +1,23 @@
 {
+  "name": "buyerservices",
+  "version": "1.0.0",
+  "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
   "dependencies": {
-    "amqplib": "^0.10.7",
-    "csv-parser": "^3.2.0",
+    "body-parser": "^2.2.0",
+    "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
-    "image-type": "^5.2.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.13.2",
-    "multer": "^1.4.5-lts.2",
     "nodemon": "^3.1.9",
-    "uuid": "^11.1.0",
     "winston": "^3.17.0"
   }
 }

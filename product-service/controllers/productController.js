@@ -4,6 +4,8 @@ const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const config = require('../config');
 const { publishEvent } = require('../utils/rabbitmq');
+const fs = require('fs').promises;
+const path = require('path');
 
 const productController = {
   createProduct: async (req, res) => {
@@ -16,9 +18,8 @@ const productController = {
 
       let decoded;
       try {
-        logger.info('Decoding token', { token: token.slice(0, 10) + '...' });
-        decoded = jwt.verify(token, process.env.JWT_PUBLIC_KEY || 'your-very-secure-secret-key');
-        logger.info('Token decoded', { sub: decoded.sub, sellerId: decoded.sellerId, name: decoded.name });
+        decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-very-secure-secret-key');
+        logger.info('Token decoded', { sellerId: decoded.sellerId, name: decoded.name });
       } catch (error) {
         logger.error('Token verification failed', { error: error.message });
         return res.status(401).json({ error: 'Invalid token' });
@@ -26,66 +27,116 @@ const productController = {
 
       const sellerId = decoded.sellerId;
       const sellerName = decoded.name || 'Unknown';
-      const userId = decoded.sub;
       if (!sellerId) {
         logger.error('Missing sellerId in token', { decoded });
         return res.status(401).json({ error: 'Missing sellerId' });
       }
 
-      const { name, price, stock, categoryId, subcategoryName } = req.body;
-      if (!name || price <= 0 || stock < 0 || !categoryId) {
-        logger.error('Invalid input for createProduct', { body: req.body });
-        return res.status(400).json({ error: 'Invalid input' });
+      const { name, price, stock, categoryId, subcategoryName, description, images } = req.body;
+
+      // Validate required fields
+      if (!name || typeof name !== 'string' || name.trim() === '') {
+        logger.error('Invalid name', { body: req.body });
+        return res.status(400).json({ error: 'Name is required and must be a non-empty string' });
       }
 
-      try {
-        const response = await axios.get(`${config.categoryServiceUrl}/categories/${categoryId}`);
-        if (!response.data.id) {
-          logger.error('Category validation failed', { categoryId });
-          return res.status(404).json({ error: 'Category not found' });
+      if (!description || typeof description !== 'string' || description.trim() === '') {
+        logger.error('Invalid description', { body: req.body });
+        return res.status(400).json({ error: 'Description is required and must be a non-empty string' });
+      }
+
+      if (!categoryId || typeof categoryId !== 'string' || categoryId.trim() === '') {
+        logger.error('Invalid categoryId', { body: req.body });
+        return res.status(400).json({ error: 'CategoryId is required and must be a non-empty string' });
+      }
+
+      if (!subcategoryName || typeof subcategoryName !== 'string' || subcategoryName.trim() === '') {
+        logger.error('Invalid subcategoryName', { body: req.body });
+        return res.status(400).json({ error: 'SubcategoryName is required and must be a non-empty string' });
+      }
+
+      if (!price || typeof price !== 'number' || price <= 0) {
+        logger.error('Invalid price', { body: req.body });
+        return res.status(400).json({ error: 'Price is required and must be a positive number' });
+      }
+
+      if (!stock || typeof stock !== 'number' || stock < 0) {
+        logger.error('Invalid stock', { body: req.body });
+        return res.status(400).json({ error: 'Stock is required and must be a non-negative number' });
+      }
+
+      if (!images || !Array.isArray(images) || images.length === 0) {
+        logger.error('Invalid images', { images });
+        return res.status(400).json({ error: 'Images must be a non-empty array' });
+      }
+
+      // Validate images array
+      for (const imageBase64 of images) {
+        if (!imageBase64 || typeof imageBase64 !== 'string' || imageBase64.trim() === '') {
+          logger.error('Invalid imageBase64', { imageBase64 });
+          return res.status(400).json({ error: 'Each image must be a non-empty string' });
         }
 
-        if (subcategoryName) {
-          const subcategories = response.data.subcategories || [];
-          const subcategoryExists = subcategories.some(sub => sub.name === subcategoryName);
-          if (!subcategoryExists) {
-            logger.error('Subcategory not found', { categoryId, subcategoryName });
-            return res.status(404).json({ error: 'Subcategory not found' });
-          }
+        // Check size limit (5MB)
+        const maxSize = 5 * 1024 * 1024;
+        if (Buffer.byteLength(imageBase64) > maxSize) {
+          logger.error('Image size exceeds limit', { size: Buffer.byteLength(imageBase64) });
+          return res.status(400).json({ error: 'Image size exceeds 5MB limit' });
         }
-        logger.info('Category and subcategory validated', { categoryId, subcategoryName });
-      } catch (error) {
-        logger.error('Category service error', { error: error.message, categoryId });
-        return res.status(503).json({ error: 'Category service unavailable' });
+
+        // Decode raw Base64
+        let buffer;
+        try {
+          buffer = Buffer.from(imageBase64, 'base64');
+        } catch (err) {
+          logger.error('Invalid Base64 encoding', { error: err.message });
+          return res.status(400).json({ error: 'Invalid Base64 string' });
+        }
+      }
+
+      let imagePaths = [];
+      if (images && Array.isArray(images)) {
+        for (const imageBase64 of images) {
+          // Create upload directory
+          const uploadDir = path.join(__dirname, '../Uploads');
+          await fs.mkdir(uploadDir, { recursive: true });
+
+          // Save image file with default .jpg extension
+          const filename = `${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
+          const uploadPath = path.join(uploadDir, filename);
+          const buffer = Buffer.from(imageBase64, 'base64');
+          await fs.writeFile(uploadPath, buffer);
+          imagePaths.push(`/uploads/${filename}`);
+        }
       }
 
       const product = new Product({
-        name,
-        description: req.body.description || '',
+        name: name.trim(),
+        description: description.trim(),
         price,
-        images: req.body.images || [],
+        images: imagePaths,
         stock,
         sellerId,
-        categoryId,
-        subcategoryName: subcategoryName || '',
+        sellerName,
+        categoryId: categoryId.trim(),
+        subcategoryName: subcategoryName.trim(),
       });
 
       await product.save();
       const productData = {
         id: product._id.toString(),
         sellerId: product.sellerId,
-        sellerName,
+        sellerName: product.sellerName,
         message: 'Product added successfully',
       };
       logger.info('Product created via POST /add/products', {
         id: productData.id,
         sellerId,
         sellerName,
-        userId,
         categoryId,
         subcategoryName,
       });
-      publishEvent('created', { ...productData, name, price, stock, categoryId, subcategoryName });
+      publishEvent('created', { ...productData, name, price, stock, categoryId, subcategoryName, description });
       res.status(201).json(productData);
     } catch (error) {
       logger.error('Failed to create product', {
@@ -94,6 +145,11 @@ const productController = {
         categoryId: req.body.categoryId,
         subcategoryName: req.body.subcategoryName,
       });
+      if (imagePaths.length > 0) {
+        for (const imagePath of imagePaths) {
+          await fs.unlink(path.join(__dirname, '..', imagePath)).catch(e => logger.error('Failed to delete file', { error: e.message }));
+        }
+      }
       const status = error.message.includes('not found') ? 404 : 400;
       res.status(status).json({ error: error.message });
     }
@@ -110,12 +166,14 @@ const productController = {
       const productData = products.map((product) => ({
         id: product._id.toString(),
         sellerId: product.sellerId,
-        sellerName: req.user?.name || 'Unknown',
+        sellerName: product.sellerName || 'Unknown',
         name: product.name,
         price: product.price,
         stock: product.stock,
         categoryId: product.categoryId,
         subcategoryName: product.subcategoryName,
+        description: product.description,
+        images: product.images.map(image => image ? `${req.protocol}://${req.get('host')}${image}` : null),
       }));
 
       logger.info('All products retrieved', { count: productData.length });
@@ -134,27 +192,6 @@ const productController = {
         return res.status(400).json({ error: 'Category ID is required' });
       }
 
-      try {
-        const response = await axios.get(`${config.categoryServiceUrl}/categories/${categoryId}`);
-        if (!response.data.id) {
-          logger.error('Category validation failed', { categoryId });
-          return res.status(404).json({ error: 'Category not found' });
-        }
-
-        if (subcategoryName) {
-          const subcategories = response.data.subcategories || [];
-          const subcategoryExists = subcategories.some(sub => sub.name === subcategoryName);
-          if (!subcategoryExists) {
-            logger.error('Subcategory not found', { categoryId, subcategoryName });
-            return res.status(404).json({ error: 'Subcategory not found' });
-          }
-        }
-        logger.info('Category and subcategory validated for listing', { categoryId, subcategoryName });
-      } catch (error) {
-        logger.error('Category service error', { error: error.message, categoryId });
-        return res.status(503).json({ error: 'Category service unavailable' });
-      }
-
       const query = { categoryId };
       if (subcategoryName) {
         query.subcategoryName = subcategoryName;
@@ -163,16 +200,19 @@ const productController = {
       const products = await Product.find(query);
       if (!products.length) {
         logger.info('No products found', { categoryId, subcategoryName });
+        return res.status(200).json([]);
       }
 
       const productData = products.map((product) => ({
         id: product._id.toString(),
         sellerId: product.sellerId,
-        sellerName: req.user?.name || 'Unknown',
+        sellerName: product.sellerName || 'Unknown',
         name: product.name,
         price: product.price,
         stock: product.stock,
         subcategoryName: product.subcategoryName,
+        description: product.description,
+        images: product.images.map(image => image ? `${req.protocol}://${req.get('host')}${image}` : null),
       }));
 
       logger.info('Products listed via GET /products/by-category', {
@@ -191,99 +231,53 @@ const productController = {
     }
   },
 
-  getProductsBySeller: async (req, res) => {
+  getProductsBySellerId: async (req, res) => {
     try {
-      const sellerId = req.user?.sellerId; // Extracted from JWT by authSeller middleware
-      if (!sellerId) {
-        logger.error('Seller ID not found in token');
-        return res.status(401).json({ error: 'Unauthorized: Seller ID missing' });
+      const token = req.headers.authorization?.split(' ')[1];
+      if (!token) {
+        logger.error('No token provided for getProductsBySellerId');
+        return res.status(401).json({ error: 'No token provided' });
       }
 
-      // Fetch only products matching the sellerId
-      const products = await Product.find({ sellerId }).lean();
+      let decoded;
+      try {
+        decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-very-secure-secret-key');
+        logger.info('Token decoded', { sellerId: decoded.sellerId, name: decoded.name });
+      } catch (error) {
+        logger.error('Token verification failed', { error: error.message });
+        return res.status(401).json({ error: 'Invalid token' });
+      }
 
+      const sellerId = decoded.sellerId;
+      if (!sellerId) {
+        logger.error('Missing sellerId in token', { decoded });
+        return res.status(401).json({ error: 'Missing sellerId' });
+      }
+
+      const products = await Product.find({ sellerId }).lean();
       if (!products.length) {
         logger.info('No products found for seller', { sellerId });
         return res.status(200).json({ message: 'No products found', products: [] });
       }
 
-      // Fetch category details for each product
-      const categoryPromises = products.map(async (product) => {
-        if (product.categoryId) {
-          try {
-            const categoryResponse = await axios.get(`${config.categoryServiceUrl}/categories/${product.categoryId}`);
-            product.category = categoryResponse.data; // Include category details
-          } catch (categoryError) {
-            logger.error('Failed to fetch category', { categoryId: product.categoryId, error: categoryError.message });
-            product.category = { name: 'Unknown', error: 'Category not found' };
-          }
-        }
-        product.sellerName = req.user?.name || 'Unknown'; // Use token's name
-        return product;
-      });
+      const productData = products.map((product) => ({
+        id: product._id.toString(),
+        sellerId: product.sellerId,
+        sellerName: decoded.name || 'Unknown',
+        name: product.name,
+        price: product.price,
+        stock: product.stock,
+        categoryId: product.categoryId,
+        subcategoryName: product.subcategoryName,
+        description: product.description,
+        images: product.images.map(image => image ? `${req.protocol}://${req.get('host')}${image}` : null),
+      }));
 
-      const productsWithCategories = await Promise.all(categoryPromises);
-
-      logger.info('Products fetched successfully', { sellerId, count: productsWithCategories.length });
-      res.status(200).json({
-        message: 'Products fetched successfully',
-        products: productsWithCategories,
-      });
+      logger.info('Products listed by sellerId', { sellerId, count: productData.length });
+      res.status(200).json(productData);
     } catch (error) {
-      logger.error('Error fetching products', { error: error.message });
-      res.status(500).json({ error: 'Failed to fetch products' });
-    }
-  },
-
-  getAllProductsWithSellerVerification: async (req, res) => {
-    try {
-      const sellerId = req.user?.sellerId; // Extracted from JWT by authSeller middleware
-      if (!sellerId) {
-        logger.error('Seller ID not found in token');
-        return res.status(401).json({ error: 'Unauthorized: Seller ID missing' });
-      }
-
-      // Fetch all products
-      const products = await Product.find().lean();
-
-      if (!products.length) {
-        logger.info('No products found');
-        return res.status(200).json({ message: 'No products found', products: [] });
-      }
-
-      // Verify each product's sellerId against the token
-      const verifiedProducts = products.filter(product => product.sellerId === sellerId);
-
-      if (!verifiedProducts.length) {
-        logger.info('No products match the seller ID', { sellerId });
-        return res.status(200).json({ message: 'No matching products found', products: [] });
-      }
-
-      // Fetch category details for verified products
-      const categoryPromises = verifiedProducts.map(async (product) => {
-        if (product.categoryId) {
-          try {
-            const categoryResponse = await axios.get(`${config.categoryServiceUrl}/categories/${product.categoryId}`);
-            product.category = categoryResponse.data; // Include category details
-          } catch (categoryError) {
-            logger.error('Failed to fetch category', { categoryId: product.categoryId, error: categoryError.message });
-            product.category = { name: 'Unknown', error: 'Category not found' };
-          }
-        }
-        product.sellerName = req.user?.name || 'Unknown'; // Use token's name
-        return product;
-      });
-
-      const productsWithCategories = await Promise.all(categoryPromises);
-
-      logger.info('All products verified and fetched successfully', { sellerId, count: productsWithCategories.length });
-      res.status(200).json({
-        message: 'All products verified and fetched successfully',
-        products: productsWithCategories,
-      });
-    } catch (error) {
-      logger.error('Error fetching and verifying products', { error: error.message });
-      res.status(500).json({ error: 'Failed to fetch and verify products' });
+      logger.error('Failed to get products by sellerId', { error: error.message, sellerId: decoded?.sellerId });
+      res.status(500).json({ error: 'Failed to retrieve products' });
     }
   },
 };
