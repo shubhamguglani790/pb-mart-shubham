@@ -1,0 +1,134 @@
+version: '3.9'
+
+services:
+  auth-service:
+    build:
+      context: ./authservices
+      dockerfile: ../Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - MONGODB_URI=mongodb://mongodb:27017/indiamart
+      - JWT_SECRET=your-very-secure-secret-key
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+    depends_on:
+      mongodb:
+        condition: service_started
+    networks:
+      - indiamart-network
+
+  buyerservices:
+    build:
+      context: ./buyerservices
+      dockerfile: ../Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=development
+      - PORT=3002
+      - MONGODB_URI=mongodb://mongodb:27017/indiamart
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+    depends_on:
+      mongodb:
+        condition: service_started
+    networks:
+      - indiamart-network
+
+  category-service:
+    build:
+      context: ./category-service
+      dockerfile: ../Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      - NODE_ENV=development
+      - PORT=3003
+      - MONGODB_URI=mongodb://mongodb:27017/indiamart
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+    depends_on:
+      mongodb:
+        condition: service_started
+    volumes:
+      - category-uploads:/usr/src/app/Uploads
+    networks:
+      - indiamart-network
+
+  notification-service:
+    build:
+      context: ./notificationservices
+      dockerfile: ../Dockerfile
+    ports:
+      - "3006:3006"
+    environment:
+      - NODE_ENV=development
+      - PORT=3006
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - RABBITMQ_QUEUE=sms_notifications
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - indiamart-network
+
+  product-service:
+    build:
+      context: ./product-service
+      dockerfile: ../Dockerfile
+    ports:
+      - "3005:3005"
+    environment:
+      - NODE_ENV=development
+      - PORT=3005
+      - MONGODB_URI=mongodb://mongodb:27017/indiamart
+      - JWT_PUBLIC_KEY=your-very-secure-secret-key
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - CATEGORY_SERVICE_URL=http://category-service:3003
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+    depends_on:
+      mongodb:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - product-uploads:/usr/src/app/Uploads
+    networks:
+      - indiamart-network
+
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - indiamart-network
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - indiamart-network
+
+volumes:
+  mongodb-data:
+  category-uploads:
+  product-uploads:
+
+networks:
+  indiamart-network:
+    driver: bridge

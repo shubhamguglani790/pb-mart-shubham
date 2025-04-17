@@ -1,15 +1,14 @@
-require('dotenv').config();
+// buyerservices/config/db.js
 const mongoose = require('mongoose');
 
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/indiamart', {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
+    await mongoose.connect(process.env.MONGODB_URI, {
+      // Remove deprecated options
     });
-    console.log("MongoDB connected - User Service");
+    console.log('MongoDB connected successfully');
   } catch (error) {
-    console.error("MongoDB connection error", error);
+    console.error('MongoDB connection error:', error);
     process.exit(1);
   }
 };

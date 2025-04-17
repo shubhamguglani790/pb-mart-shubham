@@ -4,11 +4,12 @@ const fs = require('fs').promises;
 const csvParser = require('csv-parser');
 const path = require('path');
 const { Readable } = require('stream');
+const mongoose = require('mongoose');
 
 const categoryController = {
   createCategory: async (req, res) => {
     try {
-      const { name, description, subcategories, imageBase64 } = req.body;
+      const { name, description, subcategories, imageBase64, parentId } = req.body;
 
       // Validate required fields
       if (!name || typeof name !== 'string' || name.trim() === '') {
@@ -31,6 +32,19 @@ const categoryController = {
         if (!sub || typeof sub !== 'object' || !sub.name || typeof sub.name !== 'string' || sub.name.trim() === '' || !sub.description || typeof sub.description !== 'string' || sub.description.trim() === '') {
           logger.error('Invalid subcategory', { sub });
           return res.status(400).json({ error: 'Each subcategory must have a non-empty name and description' });
+        }
+      }
+
+      // Validate parentId if provided
+      if (parentId) {
+        if (!mongoose.isValidObjectId(parentId)) {
+          logger.error('Invalid parentId format', { parentId });
+          return res.status(400).json({ error: 'Invalid parentId format' });
+        }
+        const parentCategory = await Category.findOne({ parentId });
+        if (!parentCategory) {
+          logger.error('Parent category not found', { parentId });
+          return res.status(404).json({ error: 'Parent category not found' });
         }
       }
 
@@ -66,7 +80,7 @@ const categoryController = {
         const filename = `${Date.now()}.jpg`;
         const uploadPath = path.join(uploadDir, filename);
         await fs.writeFile(uploadPath, buffer);
-        imagePath = `/uploads/${filename}`;
+        imagePath = `/Uploads/${filename}`;
       }
 
       // Create and save category
@@ -74,6 +88,7 @@ const categoryController = {
         name: name.trim(),
         description: description.trim(),
         image: imagePath,
+        parentId: parentId || undefined,
         subcategories: subcategories.map(sub => ({
           name: sub.name.trim(),
           description: sub.description.trim(),
@@ -90,12 +105,13 @@ const categoryController = {
       }
 
       const imageUrl = imagePath ? `${req.protocol}://${req.get('host')}${imagePath}` : null;
-      logger.info('Category created', { id: category._id, name: category.name });
+      logger.info('Category created', { id: category._id, name: category.name, parentId: category.parentId });
       res.status(201).json({
         id: category._id.toString(),
         name: category.name,
         description: category.description,
         image: imageUrl,
+        parentId: category.parentId.toString(),
         subcategories: category.subcategories,
       });
     } catch (error) {
@@ -123,17 +139,21 @@ const categoryController = {
         if (requestedFields.includes('name')) response.name = category.name;
         if (requestedFields.includes('description')) response.description = category.description;
         if (requestedFields.includes('subcategories')) response.subcategories = category.subcategories;
+        if (requestedFields.includes('parentId')) {
+          response.parentId = category.parentId.toString();
+        }
       } else {
         response = {
           id: category._id.toString(),
           name: category.name,
           description: category.description,
           image: category.image ? `${req.protocol}://${req.get('host')}${category.image}` : null,
+          parentId: category.parentId.toString(),
           subcategories: category.subcategories,
         };
       }
 
-      logger.info('Category retrieved', { id });
+      logger.info('Category retrieved', { id, parentId: category.parentId });
       res.json(response);
     } catch (error) {
       logger.error('Get category failed', { error: error.message, id: req.params.id });
@@ -145,30 +165,55 @@ const categoryController = {
     try {
       const { id } = req.params;
       const { name, description } = req.body;
-      if (!name || typeof name !== 'string' || name.trim() === '' || !description || typeof description !== 'string' || description.trim() === '') {
-        logger.error('Invalid subcategory data', { body: req.body });
-        return res.status(400).json({ error: 'Subcategory name and description must be non-empty strings' });
+
+      // Validate required fields
+      if (!name || typeof name !== 'string' || name.trim() === '') {
+        logger.error('Invalid subcategory name', { body: req.body });
+        return res.status(400).json({ error: 'Subcategory name must be a non-empty string' });
+      }
+      if (!description || typeof description !== 'string' || description.trim() === '') {
+        logger.error('Invalid subcategory description', { body: req.body });
+        return res.status(400).json({ error: 'Subcategory description must be a non-empty string' });
       }
 
+      // Validate category ID
+      if (!mongoose.isValidObjectId(id)) {
+        logger.error('Invalid category ID format', { id });
+        return res.status(400).json({ error: 'Invalid category ID format' });
+      }
+
+      // Find the category
       const category = await Category.findById(id);
       if (!category) {
         logger.error('Category not found', { id });
         return res.status(404).json({ error: 'Category not found' });
       }
 
-      category.subcategories.push({ name: name.trim(), description: description.trim() });
+      // Check for duplicate subcategory name (case-insensitive)
+      const trimmedName = name.trim();
+      const exists = category.subcategories.some(
+        sub => sub.name.toLowerCase() === trimmedName.toLowerCase()
+      );
+      if (exists) {
+        logger.error('Subcategory name already exists', { categoryId: id, name: trimmedName });
+        return res.status(400).json({ error: 'Subcategory with this name already exists' });
+      }
+
+      // Add new subcategory
+      category.subcategories.push({ name: trimmedName, description: description.trim() });
       await category.save();
 
-      logger.info('Subcategory added', { categoryId: id, subcategoryName: name });
+      logger.info('Subcategory added', { categoryId: id, subcategoryName: trimmedName });
       res.status(200).json({
         id: category._id.toString(),
         name: category.name,
         image: category.image ? `${req.protocol}://${req.get('host')}${category.image}` : null,
+        parentId: category.parentId ? category.parentId.toString() : null,
         subcategories: category.subcategories,
       });
     } catch (error) {
       logger.error('Add subcategory failed', { error: error.message, id: req.params.id });
-      res.status(400).json({ error: 'Invalid request' });
+      res.status(500).json({ error: 'Failed to add subcategory', details: error.message });
     }
   },
 
@@ -198,14 +243,28 @@ const categoryController = {
           subcategoryName: row.subcategoryName?.trim(),
           subcategoryDescription: row.subcategoryDescription?.trim(),
           image: row.image?.trim(),
+          parentId: row.parentId?.trim(),
         });
       }
 
       for (const row of results) {
-        const { categoryName, categoryDescription, subcategoryName, subcategoryDescription, image } = row;
+        const { categoryName, categoryDescription, subcategoryName, subcategoryDescription, image, parentId } = row;
         if (!categoryName || !categoryDescription || !subcategoryName || !subcategoryDescription) {
           errors.push(`Missing fields in row: ${JSON.stringify(row)}`);
           continue;
+        }
+
+        // Validate parentId if provided
+        if (parentId) {
+          if (!mongoose.isValidObjectId(parentId)) {
+            errors.push(`Invalid parentId format in row: ${parentId}`);
+            continue;
+          }
+          const parentCategory = await Category.findOne({ parentId });
+          if (!parentCategory) {
+            errors.push(`Parent category not found for parentId: ${parentId}`);
+            continue;
+          }
         }
 
         let category = await Category.findOne({ name: categoryName });
@@ -214,6 +273,7 @@ const categoryController = {
             name: categoryName,
             description: categoryDescription,
             image: image || null,
+            parentId: parentId || undefined,
             subcategories: [],
           });
         }
@@ -262,6 +322,7 @@ const categoryController = {
         name: category.name,
         description: category.description,
         image: category.image ? `${req.protocol}://${req.get('host')}${category.image}` : null,
+        parentId: category.parentId ? category.parentId.toString() : null,
         subcategories: category.subcategories,
       }));
 
@@ -282,19 +343,19 @@ const categoryController = {
   getSubcategories: async (req, res) => {
     try {
       const { id } = req.params;
+      if (!mongoose.isValidObjectId(id)) {
+        logger.error('Invalid category ID format', { id });
+        return res.status(400).json({ error: 'Invalid category ID format' });
+      }
+
       const category = await Category.findById(id);
       if (!category) {
         logger.error('Category not found', { id });
         return res.status(404).json({ error: 'Category not found' });
       }
 
-      logger.info('Subcategories retrieved', { id });
-      res.status(200).json({
-        id: category._id.toString(),
-        name: category.name,
-        image: category.image ? `${req.protocol}://${req.get('host')}${category.image}` : null,
-        subcategories: category.subcategories,
-      });
+      logger.info('Subcategories retrieved', { id, parentId: category.parentId });
+      res.status(200).json(category.subcategories);
     } catch (error) {
       logger.error('Get subcategories failed', { error: error.message, id: req.params.id });
       res.status(400).json({ error: 'Invalid category ID' });

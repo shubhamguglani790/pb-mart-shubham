@@ -22,5 +22,5 @@ mongoose.connect(process.env.MONGODB_URI)
   .then(() => logger.info('MongoDB connected successfully'))
   .catch((err) => logger.error('MongoDB connection error', { error: err.message }));
 
-const PORT = process.env.PORT || 3333;
+const PORT = process.env.PORT || 3003;
 app.listen(PORT, () => logger.info(`Category Service running on port ${PORT}`));

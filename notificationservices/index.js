@@ -1,4 +1,3 @@
-// index.js
 require('dotenv').config();
 const express = require('express');
 const notificationRoutes = require('./routes/notifications');
@@ -7,7 +6,7 @@ const logger = require('./utils/logger');
 const { handleError, errorMiddleware } = require('./utils/errorHandler');
 
 const app = express();
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.PORT || 3006;
 
 app.use(express.json());
 app.use('/notifications', notificationRoutes);
@@ -21,7 +20,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Global error middleware (catches unhandled errors)
 app.use(errorMiddleware);
 
 const startServer = async () => {
@@ -31,7 +29,7 @@ const startServer = async () => {
       logger.info(`Server running on port ${PORT}`);
     });
   } catch (error) {
-    logger.error('Failed to start server', { error: error.message }); // Log directly since no res object
+    logger.error('Failed to start server', { error: error.message });
     process.exit(1);
   }
 };
