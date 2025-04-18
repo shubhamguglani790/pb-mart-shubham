@@ -5,11 +5,17 @@ const logger = require('./utils/logger');
 const productRoutes = require('./routes/productRoutes');
 const fs = require('fs');
 const path = require('path');
+const cors = require('cors');
 
 dotenv.config();
 const app = express();
 
-app.use(express.json());
+// Enable CORS for all routes
+app.use(cors());
+
+// Increase payload size limit to 10MB (or adjust as needed)
+app.use(express.json({ limit: '50mb' }));
+
 app.use('/uploads', express.static(path.join(__dirname, 'Uploads'))); // Serve Uploads directory
 app.use('/', productRoutes);
 
